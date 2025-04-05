@@ -1,0 +1,109 @@
+---
+- name: 5 Minute Plan - Ubuntu SQL - Cayden Wright
+  hosts: stegosaurus
+  become: yes
+  vars:
+    my_ip: "10.0.1.250" # main machine’s IP address
+    mysql_allowed_ip: "10.0.1.250" # scoring IP address
+    allowed_users:
+      - name: ctw4068
+        password: HASH_GOES_HERE
+      - name: "{{ ansible_user }}"
+        password: HASH_GOES_HERE
+    ssh_pub_key: "{{ lookup('file', './files/ssh_pubkey.pub') }}" # your SSH pubkey
+  tasks:
+    - name: Ensure allowed users exist, are sudoers, and have passwords
+      user:
+        name: "{{ item.name }}"
+        password: "{{ item.password }}"
+        shell: /bin/bash
+        create_home: yes
+        groups: sudo
+        append: yes
+      loop: "{{ allowed_users }}"
+
+    - name: Transfer SSH public key to each allowed user
+      authorized_key:
+        user: "{{ item.name }}"
+        key: "{{ ssh_pub_key }}"
+        state: present
+      loop: "{{ allowed_users }}"
+
+    - name: Copy user audit script
+      copy:
+        src: ./files/useraudit.sh
+        dest: "/home/{{ item.name }}/useraudit.sh"
+        mode: '0700'
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
+      loop: "{{ allowed_users }}"
+      
+    - name: Copy service audit script
+      copy:
+        src: ./files/serviceaudit.sh
+        dest: "/home/{{ item.name }}/serviceaudit.sh"
+        mode: '0700'
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
+      loop: "{{ allowed_users }}"
+
+    - name: Disable SSH password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        state: present
+      notify: Restart SSH
+      
+    - name: Ensure perl is installed (for user script)
+      apt:
+        name: perl
+        state: present
+        update_cache: yes
+    
+    - name: Ensure ufw is installed
+      apt:
+        name: ufw
+        state: present
+        update_cache: yes
+
+    - name: Enable ufw firewall with default deny policy
+      ufw:
+        state: enabled
+        policy: deny
+
+    - name: Allow SSH connections from my IP only
+      ufw:
+        rule: allow
+        from_ip: "{{ my_ip }}"
+        port: 22
+        proto: tcp
+
+    - name: Deny SSH connections from other IPs
+      ufw:
+        rule: deny
+        port: 22
+        proto: tcp
+
+    - name: Allow MySQL connections from allowed IP only
+      ufw:
+        rule: allow
+        from_ip: "{{ mysql_allowed_ip }}"
+        port: 3306
+        proto: tcp
+
+    - name: Deny MySQL connections from other IPs
+      ufw:
+        rule: deny
+        port: 3306
+        proto: tcp
+        
+    - name: Enable UFW logging
+      ufw:
+        logging: on
+        
+  handlers:
+    - name: Restart SSH
+      service:
+        name: ssh
+        state: restarted

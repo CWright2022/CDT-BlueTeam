@@ -1,0 +1,43 @@
+---
+- name: Set up Fail2Ban - Cayden Wright
+  hosts: stegosaurus
+  become: yes
+  tasks:
+    - name: Install Fail2Ban
+      apt:
+        name: fail2ban
+        state: present
+        update_cache: yes
+
+    - name: Configure Fail2Ban for SSH
+      copy:
+        dest: /etc/fail2ban/jail.d/ssh.conf
+        content: |
+          [sshd]
+          enabled = true
+          port    = ssh
+          logpath = %(sshd_log)s
+          maxretry = 3
+          bantime = 900
+          findtime = 600
+          backend = systemd
+      notify: Restart Fail2Ban
+
+    - name: Ensure Fail2Ban is enabled and running
+      service:
+        name: fail2ban
+        state: started
+        enabled: yes
+
+    - name: Enable Fail2Ban logging (default is on, but this ensures it)
+      lineinfile:
+        path: /etc/fail2ban/fail2ban.conf
+        regexp: '^logtarget ='
+        line: 'logtarget = /var/log/fail2ban.log'
+      notify: Restart Fail2Ban
+
+  handlers:
+    - name: Restart Fail2Ban
+      service:
+        name: fail2ban
+        state: restarted
